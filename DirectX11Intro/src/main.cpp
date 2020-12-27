@@ -368,6 +368,264 @@ int InitDirectX(HINSTANCE hInstance, BOOL vSync)
     return 0;
 }
 
+template<class ShaderClass>
+std::string GetLatestProfile();
+
+template<>
+std::string GetLatestProfile<ID3D11VertexShader>()
+{
+    assert(D3dDevice);
+
+    D3D_FEATURE_LEVEL featureLevel = D3dDevice->GetFeatureLevel();
+
+    switch (featureLevel)
+    {
+    case D3D_FEATURE_LEVEL_11_1:
+    case D3D_FEATURE_LEVEL_11_0:
+        return "vs_5_0";
+        break;
+    case D3D_FEATURE_LEVEL_10_1:
+        return "vs_4_1";
+        break;
+    case D3D_FEATURE_LEVEL_10_0:
+        return "vs_4_0";
+        break;
+    case D3D_FEATURE_LEVEL_9_3:
+        return "vs_4_0_level_9_3";
+        break;
+    case D3D_FEATURE_LEVEL_9_2:
+    case D3D_FEATURE_LEVEL_9_1:
+        return "vs_4_0_level_9_1";
+        break;
+    }
+
+    return "";
+}
+
+template<>
+std::string GetLatestProfile<ID3D11PixelShader>()
+{
+    assert(D3dDevice);
+
+    // Query the current feature level:
+    D3D_FEATURE_LEVEL featureLevel = D3dDevice->GetFeatureLevel();
+    switch (featureLevel)
+    {
+    case D3D_FEATURE_LEVEL_11_1:
+    case D3D_FEATURE_LEVEL_11_0:
+    {
+        return "ps_5_0";
+    }
+    break;
+    case D3D_FEATURE_LEVEL_10_1:
+    {
+        return "ps_4_1";
+    }
+    break;
+    case D3D_FEATURE_LEVEL_10_0:
+    {
+        return "ps_4_0";
+    }
+    break;
+    case D3D_FEATURE_LEVEL_9_3:
+    {
+        return "ps_4_0_level_9_3";
+    }
+    break;
+    case D3D_FEATURE_LEVEL_9_2:
+    case D3D_FEATURE_LEVEL_9_1:
+    {
+        return "ps_4_0_level_9_1";
+    }
+    break;
+    }
+    return "";
+}
+
+bool LoadContent()
+{
+    assert(D3dDevice);
+
+    D3D11_BUFFER_DESC vertexBufferDesc;
+    ZeroMemory(&vertexBufferDesc, sizeof(D3D11_BUFFER_DESC));
+
+    vertexBufferDesc.BindFlags = D3D11_BIND_VERTEX_BUFFER;
+    vertexBufferDesc.ByteWidth = sizeof(VertexPosColor) * _countof(Vertices);
+    vertexBufferDesc.CPUAccessFlags = 0;
+    vertexBufferDesc.Usage = D3D11_USAGE_DEFAULT;
+
+    D3D11_SUBRESOURCE_DATA resourceData;
+    ZeroMemory(&resourceData, sizeof(D3D11_SUBRESOURCE_DATA));
+
+    resourceData.pSysMem = Vertices;
+
+    HRESULT hr = D3dDevice->CreateBuffer(&vertexBufferDesc, &resourceData, &D3dVertexBuffer);
+    if (FAILED(hr))
+        return false;
+
+    D3D11_BUFFER_DESC indexBufferDesc;
+    ZeroMemory(&indexBufferDesc, sizeof(D3D11_BUFFER_DESC));
+
+    indexBufferDesc.BindFlags = D3D11_BIND_INDEX_BUFFER;
+    indexBufferDesc.ByteWidth = sizeof(WORD) * _countof(Indicies);
+    indexBufferDesc.CPUAccessFlags = 0;
+    indexBufferDesc.Usage = D3D11_USAGE_DEFAULT;
+    resourceData.pSysMem = Indicies;
+
+    hr = D3dDevice->CreateBuffer(&indexBufferDesc, &resourceData, &D3dIndexBuffer);
+    if (FAILED(hr))
+        return false;
+
+    D3D11_BUFFER_DESC constantBufferDesc;
+    ZeroMemory(&constantBufferDesc, sizeof(D3D11_BUFFER_DESC));
+
+    constantBufferDesc.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
+    constantBufferDesc.ByteWidth = sizeof(XMMATRIX);
+    constantBufferDesc.CPUAccessFlags = 0;
+    constantBufferDesc.Usage = D3D11_USAGE_DEFAULT;
+
+    hr = D3dDevice->CreateBuffer(&constantBufferDesc, nullptr, &D3dConstantBuffers[CB_Application]);
+    if (FAILED(hr))
+        return false;
+
+    hr = D3dDevice->CreateBuffer(&constantBufferDesc, nullptr, &D3dConstantBuffers[CB_Frame]);
+    if (FAILED(hr))
+        return false;
+
+    hr = D3dDevice->CreateBuffer(&constantBufferDesc, nullptr, &D3dConstantBuffers[CB_Object]);
+    if (FAILED(hr))
+        return false;
+
+#pragma region ShadersLoading
+    D3dVertexShader = LoadShader<ID3D11VertexShader>(L"inc/SimpleVertexShader.hlsl", "SimpleVertexShader", "latest");
+    D3dPixelShader = LoadShader<ID3D11PixelShader>(L"inc/SimplePixelShader.hlsl", "SimplePixelShader", "latest");
+
+    /*ID3DBlob* vertexShaderBlob;
+#if _DEBUG
+    LPCWSTR compiledVertexShaderObject = L"SimpleVertexShader_d.cso";
+#else
+    LPCWSTR compiledVertexShaderObject = L"SimpleVertexShader.cso";
+#endif
+
+    hr = D3DReadFileToBlob(compiledVertexShaderObject, &vertexShaderBlob);
+    if (FAILED(hr))
+    {
+        return false;
+    }
+
+    hr = D3dDevice->CreateVertexShader(vertexShaderBlob->GetBufferPointer(), vertexShaderBlob->GetBufferSize(), nullptr, &g_d3dVertexShader);
+    if (FAILED(hr))
+    {
+        return false;
+    }*/
+
+    D3D11_INPUT_ELEMENT_DESC vertexLayoutDesc[] =
+    {
+        { "POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, offsetof(VertexPosColor,Position), D3D11_INPUT_PER_VERTEX_DATA, 0 },
+        { "COLOR", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, offsetof(VertexPosColor,Color), D3D11_INPUT_PER_VERTEX_DATA, 0 }
+    };
+
+    hr = D3dDevice->CreateInputLayout(vertexLayoutDesc, _countof(vertexLayoutDesc), D3dVertexShader->GetBufferPointer(), D3dVertexShader->GetBufferSize(), &D3dInputLayout);
+    if (FAILED(hr))
+    {
+        return false;
+    }
+#pragma endregion ShadersLoading
+
+    // Setup the projection matrix.
+    RECT clientRect;
+    GetClientRect(WindowHandle, &clientRect);
+
+    // Compute the exact client dimensions.
+    // This is required for a correct projection matrix.
+    float clientWidth = static_cast<float>(clientRect.right - clientRect.left);
+    float clientHeight = static_cast<float>(clientRect.bottom - clientRect.top);
+
+    ProjMatrix = XMMatrixPerspectiveFovLH(XMConvertToRadians(45.0f), clientWidth / clientHeight, 0.1f, 100.0f);
+
+    D3dDeviceContext->UpdateSubresource(D3dConstantBuffers[CB_Application], 0, nullptr, &ProjMatrix, 0, 0);
+
+    return true;
+}
+
+void UnloadContent()
+{
+
+}
+
+template<class ShaderClass>
+ShaderClass* CreateShader(ID3DBlob* pShaderBlob, ID3D11ClassLinkage* pClassLinckage);
+
+template <>
+ID3D11VertexShader* CreateShader<ID3D11VertexShader>(ID3DBlob* pShaderBlob, ID3D11ClassLinkage* pClassLinckage)
+{
+    assert(D3dDevice);
+    assert(pShaderBlob);
+
+    ID3D11VertexShader* pVertexShader = nullptr;
+    D3dDevice->CreateVertexShader(pShaderBlob->GetBufferPointer(), pShaderBlob->GetBufferSize(), pClassLinckage, &pVertexShader);
+
+    return pVertexShader;
+}
+
+template <>
+ID3D11PixelShader* CreateShader<ID3D11PixelShader>(ID3DBlob* pShaderBlob, ID3D11ClassLinkage* pClassLinckage)
+{
+    assert(D3dDevice);
+    assert(pShaderBlob);
+
+    ID3D11PixelShader* pPixelShader = nullptr;
+    D3dDevice->CreatePixelShader(pShaderBlob->GetBufferPointer(), pShaderBlob->GetBufferSize(), pClassLinckage, &pPixelShader);
+
+    return pPixelShader;
+}
+
+template<class ShaderClass>
+ShaderClass* LoadShader(const std::wstring& fileName, const std::string& entryPoint, const std::string& _profile)
+{
+    ID3DBlob* pShaderBlob = nullptr;
+    ID3DBlob* pErrorBlob = nullptr;
+    ShaderClass* pShader = nullptr;
+
+    std::string profile = _profile;
+    if (profile == "latest")
+    {
+        profile = GetLatestProfile<ShaderClass>();
+    }
+
+    UINT flags = D3DCOMPILE_ENABLE_STRICTNESS;
+#if _DEBUG
+    flags |= D3DCOMPILE_DEBUG;
+#endif
+
+    HRESULT hr = D3DCompileFromFile(
+        fileName.c_str(), nullptr,
+        D3D_COMPILE_STANDARD_FILE_INCLUDE, entryPoint.c_str(), profile.c_str(),
+        flags, 0, &pShaderBlob, &pErrorBlob
+    );
+
+    if (FAILED(hr))
+    {
+        if (pErrorBlob)
+        {
+            std::string errorMessage = (char*)pErrorBlob->GetBufferPointer();
+            OutputDebugStringA(errorMessage.c_str());
+
+            SafeRelease(pShaderBlob);
+            SafeRelease(pErrorBlob);
+        }
+
+        return false;
+    }
+
+    pShader = CreateShader<ShaderClass>(pShaderBlob, nullptr);
+
+    SafeRelease(pShaderBlob);
+    SafeRelease(pErrorBlob);
+
+    return pShader;
+}
+
 LRESULT CALLBACK WndProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam)
 {
     PAINTSTRUCT paintStruct;
@@ -414,12 +672,39 @@ int Run()
             float deltaTime = (currentTime - prevTime) / 1000.0f;
             deltaTime = std::min<float>(deltaTime, maxTimeStep);
 
-            //Update(deltaTime);
-            //Render();
+            Update(deltaTime);
+            Render();
         }
     }
 
     return static_cast<int>(msg.wParam);
+}
+
+void Update(float deltaTime)
+{
+    XMVECTOR eyePosition = XMVectorSet(0, 0, -10, 1);
+    XMVECTOR focusPoint = XMVectorSet(0, 0, 0, 1);
+    XMVECTOR upDirection = XMVectorSet(0, 1, 0, 0);
+    ViewMatrix = XMMatrixLookAtLH(eyePosition, focusPoint, upDirection);
+    D3dDeviceContext->UpdateSubresource(D3dConstantBuffers[CB_Frame], 0, nullptr, &ViewMatrix, 0, 0);
+
+
+    static float angle = 0.0f;
+    angle += 90.0f * deltaTime;
+    XMVECTOR rotationAxis = XMVectorSet(0, 1, 1, 0);
+
+    WorldMatrix = XMMatrixRotationAxis(rotationAxis, XMConvertToRadians(angle));
+    D3dDeviceContext->UpdateSubresource(D3dConstantBuffers[CB_Object], 0, nullptr, &WorldMatrix, 0, 0);
+}
+
+void Render()
+{
+
+}
+
+void Cleanup()
+{
+    
 }
 
 int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE prevInstance, LPWSTR cmdLine, int cmdShow)
